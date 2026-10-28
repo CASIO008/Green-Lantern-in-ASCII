@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Anel do Lanterna Verde — ASCII 3D</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&display=swap"
+    rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html,
+    body {
+      width: 100vw;
+      height: 100vh;
+      background-color: #000000;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'JetBrains Mono', monospace;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* Escala fluida automática para caber inteiro em qualquer janela (mesmo 220x220 no canto) */
+    #ascii-canvas {
+      width: 100vmin;
+      height: 100vmin;
+      display: block;
+      background-color: #000000;
+      cursor: pointer;
+      touch-action: none;
+    }
+
+    /* Vídeo oculto usado para alimentar a janela flutuante Picture-in-Picture sem abas */
+    #pip-video {
+      position: fixed;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+      left: -9999px;
+      top: -9999px;
+    }
+
+    /* Indicador visual da variável contagem */
+    #contador-display {
+      position: fixed;
+      top: 18px;
+      right: 20px;
+      color: #00ff66;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      padding: 8px 16px;
+      background: rgba(0, 20, 10, 0.75);
+      border: 1px solid rgba(0, 255, 102, 0.4);
+      border-radius: 6px;
+      box-shadow: 0 0 12px rgba(0, 255, 102, 0.25);
+      z-index: 1000;
+      pointer-events: none;
+      user-select: none;
+      transition: box-shadow 0.25s ease, border-color 0.25s ease, transform 0.2s ease;
+    }
+
+    #contador-display.pulsando {
+      box-shadow: 0 0 25px rgba(0, 255, 102, 0.9), 0 0 12px #00ff66;
+      border-color: #00ff66;
+      transform: scale(1.05);
+    }
+
+    /* Indicador visual de segurar para reiniciar */
+    #hold-indicator {
+      position: fixed;
+      top: 68px;
+      right: 20px;
+      background: rgba(0, 20, 10, 0.9);
+      border: 1px solid rgba(0, 255, 102, 0.5);
+      border-radius: 6px;
+      padding: 8px 14px;
+      color: #00ff66;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      box-shadow: 0 0 15px rgba(0, 255, 102, 0.35);
+      z-index: 1000;
+      display: none;
+      flex-direction: column;
+      gap: 6px;
+      width: 175px;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    #hold-track {
+      width: 100%;
+      height: 6px;
+      background: rgba(0, 40, 20, 0.7);
+      border-radius: 3px;
+      overflow: hidden;
+      border: 1px solid rgba(0, 255, 102, 0.3);
+    }
+
+    #hold-fill {
+      width: 0%;
+      height: 100%;
+      background: #00ff66;
+      box-shadow: 0 0 8px #00ff66;
+      transition: width 0.04s linear;
+    }
+
+    /* Dica sutil no rodapé */
+    #instrucoes-hint {
+      position: fixed;
+      bottom: 16px;
+      color: rgba(0, 255, 102, 0.55);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 1.2px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      background: rgba(0, 20, 10, 0.65);
+      border: 1px solid rgba(0, 255, 102, 0.25);
+      border-radius: 20px;
+      padding: 6px 16px;
+      z-index: 1000;
+      pointer-events: none;
+      user-select: none;
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+    }
+
+    @media (max-width: 600px) {
+      #instrucoes-hint {
+        font-size: 10px;
+        padding: 5px 12px;
+        bottom: 10px;
+        gap: 6px;
+      }
+      #contador-display {
+        top: 10px;
+        right: 10px;
+        font-size: 12px;
+        padding: 6px 12px;
+      }
+      #hold-indicator {
+        top: 55px;
+        right: 10px;
+        width: 150px;
+        font-size: 10px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div id="contador-display">CONTAGEM: 0</div>
+
+  <div id="hold-indicator">
+    <div id="hold-label">REINICIANDO...</div>
+    <div id="hold-track"><div id="hold-fill"></div></div>
+  </div>
+
+  <div id="instrucoes-hint">
+    <span>⚡ Clique: Recarregar</span>
+    <span>•</span>
+    <span>🔄 Segure no anel: Reiniciar</span>
+  </div>
+
+  <canvas id="ascii-canvas" width="600" height="600"></canvas>
+  <video id="pip-video" muted playsinline></video>
+
+  <script>
+    // ========================================================
+    // VARIÁVEL DE CONTAGEM COM RETENÇÃO DE MEMÓRIA (localStorage):
+    // - Mantém o valor salvo ao recarregar a página ou reabrir o navegador
+    // - Ao clicar no anel ou na tela: contagem += 1 (recarrega para 100%)
+    // - Ao segurar pressionado no anel (~1.1s): apaga a sequência e zera a contagem (reinicia)
+    // ========================================================
+    const STORAGE_KEY_CONTAGEM = 'gl_ring_contagem';
+
+    function carregarContagem() {
+      try {
+        const salvo = localStorage.getItem(STORAGE_KEY_CONTAGEM);
+        if (salvo !== null) {
+          const parsed = parseInt(salvo, 10);
+          if (!isNaN(parsed) && isFinite(parsed) && parsed >= 0) {
+            return parsed;
+          }
+        }
+      } catch (e) {}
+      return 0;
+    }
+
+    function salvarContagem(val) {
+      try {
+        localStorage.setItem(STORAGE_KEY_CONTAGEM, String(val));
+      } catch (e) {}
+    }
+
+    var contagem = carregarContagem();
+    window.contagem = contagem;
+
+    function atualizarDisplayContagem(pulse) {
+      var el = document.getElementById('contador-display');
+      if (el) {
+        el.textContent = 'CONTAGEM: ' + contagem;
+        if (pulse) {
+          el.classList.remove('pulsando');
+          void el.offsetWidth;
+          el.classList.add('pulsando');
+          setTimeout(() => el.classList.remove('pulsando'), 400);
+        }
+      }
+    }
+
+    (function () {
+      const canvas = document.getElementById('ascii-canvas');
+      const ctx = canvas.getContext('2d', { alpha: false });
+      const pipVideo = document.getElementById('pip-video');
+
+      // Resolução interna fixa 600x600 escalada via CSS 100vmin para qualquer tamanho de janela
+      const SCREEN_W = 600;
+      const SCREEN_H = 600;
+
+      // Grade ASCII 100x100 (células de 6x6px)
+      const CELL_W = 5;
+      const CELL_H = 5;
+      const COLS = Math.floor(SCREEN_W / CELL_W); // 100
+      const ROWS = Math.floor(SCREEN_H / CELL_H); // 100
+      const totalCells = COLS * ROWS;
+
+      // Rampas de caracteres ASCII por material
+      const RAMP_SILVER = ' .:-=+*#%@';
+      const RAMP_CRACK = '.,:;!|/\\';
+      const RAMP_GOLD = ' .:-=+*#$@';
+      const RAMP_GREEN = ' .:+=*#%@';
+      const RAMP_VEIN = '.:+*#%@$&';
+
+      // Identificadores de materiais do anel
+      const MAT_SILVER = 1;
+      const MAT_CRACK = 2;
+      const MAT_INNER_DARK = 3;
+      const MAT_GOLD = 4;
+      const MAT_EMERALD_DEEP = 5;
+      const MAT_EMERALD_VEIN = 6;
+
+      const zBuffer = new Float32Array(totalCells);
+      const charBuffer = new Array(totalCells);
+      const colorBuffer = new Array(totalCells);
+
+      // Uma carga completa de 100% dura exatamente 3 horas (10.800.000 ms) no relógio do PC
+      const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
+      const STORAGE_KEY = 'gl_ring_full_charge_timestamp_v2';
+
+      function loadFullChargeTimestamp() {
+        try {
+          const saved = localStorage.getItem(STORAGE_KEY);
+          if (saved !== null) {
+            const parsed = parseFloat(saved);
+            if (!isNaN(parsed) && isFinite(parsed)) {
+              return parsed;
+            }
+          }
+        } catch (e) {
+          // Fallback silencioso caso o localStorage esteja restrito
+        }
+        const initialTimestamp = Date.now();
+        saveFullChargeTimestamp(initialTimestamp);
+        return initialTimestamp;
+      }
+
+      function saveFullChargeTimestamp(ts) {
+        try {
+          localStorage.setItem(STORAGE_KEY, String(ts));
+        } catch (e) {
+          // Ignora erros de armazenamento
+        }
+      }
+
+      let fullChargeTimestamp = loadFullChargeTimestamp();
+
+      function computeRealTimeCharge() {
+        const now = Date.now();
+        const elapsed = Math.max(0, now - fullChargeTimestamp);
+        const remainingRatio = Math.max(0, Math.min(1, 1 - (elapsed / THREE_HOURS_MS)));
+        return remainingRatio * 100;
+      }
+
+      let ringCharge = computeRealTimeCharge();
+      let displayedCharge = ringCharge;
+      let isRechargingAnim = false;
+      let rechargeGlowBoost = 0;
+      let resetBannerTimer = 0;
+
+      // Estado de hover e coordenadas normalizadas do mouse (-1 a +1)
+      let isHovered = false;
+      let hoverBlend = 0;
+      let mouseNormX = 0;
+      let mouseNormY = 0;
+      let smoothMouseX = 0;
+      let smoothMouseY = 0;
+
+      // Parâmetros do movimento planetário cósmico
+      let spinAngle = 0.0;
+      const SPIN_SPEED = 0.38; // Velocidade da rotação axial constante
+      const AXIAL_PITCH = 0.34; // Inclinação do eixo planetário (~19.5°)
+      const AXIAL_ROLL = 0.22;  // Inclinação lateral estável do eixo (~12.6°)
+
+      /**
+       * Transformação Direta Planetária (Espaço Local -> Espaço do Mundo)
+       */
+      function localToWorld(lx, ly, lz, cSpin, sSpin, cRoll, sRoll, cPitch, sPitch, cYaw, sYaw) {
+        const x1 = lx * cSpin + lz * sSpin;
+        const y1 = ly;
+        const z1 = -lx * sSpin + lz * cSpin;
+
+        const x2 = x1 * cRoll - y1 * sRoll;
+        const y2 = x1 * sRoll + y1 * cRoll;
+        const z2 = z1;
+
+        const x3 = x2;
+        const y3 = y2 * cPitch + z2 * sPitch;
+        const z3 = -y2 * sPitch + z2 * cPitch;
+
+        const wx = x3 * cYaw + z3 * sYaw;
+        const wy = y3;
+        const wz = -x3 * sYaw + z3 * cYaw;
+
+        return { wx, wy, wz };
+      }
+
+      /**
+       * Transformação Inversa Planetária Exata (Espaço do Mundo -> Espaço Local)
+       */
+      function worldToLocal(wx, wy, wz, cSpin, sSpin, cRoll, sRoll, cPitch, sPitch, cYaw, sYaw) {
+        const x3 = wx * cYaw - wz * sYaw;
+        const y3 = wy;
+        const z3 = wx * sYaw + wz * cYaw;
+
+        const x2 = x3;
+        const y2 = y3 * cPitch - z3 * sPitch;
+        const z2 = y3 * sPitch + z3 * cPitch;
+
+        const x1 = x2 * cRoll + y2 * sRoll;
+        const y1 = -x2 * sRoll + y2 * cRoll;
+        const z1 = z2;
+
+        const lx = x1 * cSpin - z1 * sSpin;
+        const ly = y1;
+        const lz = x1 * sSpin + z1 * cSpin;
+
+        return { lx, ly, lz };
+      }
+
+      const sparks = [];
+      for (let i = 0; i < 42; i++) {
+        sparks.push({
+          angle: Math.random() * Math.PI * 2,
+          radius: 1.05 + Math.random() * 0.45,
+          y: (Math.random() - 0.5) * 1.8,
+          speed: 0.25 + Math.random() * 0.55,
+          phase: Math.random() * Math.PI * 2,
+          char: ['*', '+', '·', '.', ':'][i % 5]
+        });
+      }
+
+      function hash2D(x, y) {
+        const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
+        return s - Math.floor(s);
+      }
+
+      function cellularPattern(u, v, scale) {
+        const sx = u * scale;
+        const sy = v * scale;
+        const ix = Math.floor(sx);
+        const iy = Math.floor(sy);
+        const fx = sx - ix;
+        const fy = sy - iy;
+
+        let minDist1 = 99.0;
+        let minDist2 = 99.0;
+
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const rx = dx + hash2D(ix + dx, iy + dy) - fx;
+            const ry = dy + hash2D(ix + dx + 57.0, iy + dy + 113.0) - fy;
+            const d = Math.sqrt(rx * rx + ry * ry);
+            if (d < minDist1) {
+              minDist2 = minDist1;
+              minDist1 = d;
+            } else if (d < minDist2) {
+              minDist2 = d;
+            }
+          }
+        }
+        return minDist2 - minDist1;
+      }
+
+      const ringPoints = [];
+
+      function addPoint(x, y, z, nx, ny, nz, mat, tex) {
+        const len = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+        ringPoints.push({
+          x, y, z,
+          nx: nx / len,
+          ny: ny / len,
+          nz: nz / len,
+          mat,
+          tex
+        });
+      }
+
+      function buildRingModel() {
+        // 1. FACE FRONTAL DO EMBLEMA DO LANTERNA VERDE (+Z)
+        const faceZ = 0.86;
+        const step = 0.019;
+
+        for (let y = -0.90; y <= 0.9001; y += step) {
+          for (let x = -0.88; x <= 0.8801; x += step) {
+            const ax = Math.abs(x);
+            const ay = Math.abs(y);
+            const r = Math.sqrt(x * x + y * y);
+
+            const inTopOrBottomBar = (ay >= 0.50 && ay <= 0.90 && ax <= 0.88);
+            const inCenterBody = (ay < 0.50 && r <= 0.85);
+
+            if (!inTopOrBottomBar && !inCenterBody) continue;
+
+            let mat = MAT_EMERALD_DEEP;
+            let zOffset = 0.0;
+            let nx = 0, ny = 0, nz = 1;
+            let tex = 0.5;
+
+            const isBarGoldBorder =
+              inTopOrBottomBar &&
+              (ay > 0.81 || ay < 0.58 || ax > 0.79);
+
+            const isOuterArcGold =
+              inCenterBody && (r >= 0.75 && r <= 0.85);
+
+            const isInnerCircleGold =
+              (r >= 0.47 && r <= 0.57 && ay <= 0.56);
+
+            if (isBarGoldBorder || isOuterArcGold || isInnerCircleGold) {
+              mat = MAT_GOLD;
+              zOffset = 0.085;
+              nx = x * 0.35;
+              ny = y * 0.35;
+              nz = 1.0;
+              tex = 0.7 + 0.3 * Math.sin(x * 12 + y * 12);
+            } else {
+              const edgeVal = cellularPattern(x + 1.5, y + 1.5, 9.5);
+              const fineWeb = cellularPattern(x * 1.4 - 0.7, y * 1.4 + 0.3, 15.0);
+
+              if (r < 0.35) {
+                const domeH = Math.sqrt(Math.max(0, 0.35 * 0.35 - r * r)) * 0.22;
+                zOffset = 0.015 + domeH;
+                nx = x * 1.2;
+                ny = y * 1.2;
+                nz = 1.0;
+
+                if (edgeVal < 0.135 || fineWeb < 0.095 || (r > 0.26 && r < 0.31 && edgeVal < 0.22)) {
+                  mat = MAT_EMERALD_VEIN;
+                  tex = Math.max(0.2, 1.0 - edgeVal * 3.8);
+                } else {
+                  mat = MAT_EMERALD_DEEP;
+                  tex = 0.48;
+                }
+              } else if (inTopOrBottomBar) {
+                zOffset = 0.01;
+                if (edgeVal < 0.125) {
+                  mat = MAT_EMERALD_VEIN;
+                  tex = 0.95;
+                } else {
+                  mat = MAT_EMERALD_DEEP;
+                  tex = 0.38;
+                }
+              } else {
+                zOffset = -0.01;
+                if (edgeVal < 0.10 || (r > 0.39 && r < 0.44 && fineWeb < 0.12)) {
+                  mat = MAT_EMERALD_VEIN;
+                  tex = 0.85;
+                } else {
+                  mat = MAT_EMERALD_DEEP;
+                  tex = 0.28;
+                }
+              }
+            }
+
+            addPoint(x, y, faceZ + zOffset, nx, ny, nz, mat, tex);
+
+            const isOuterBoundary =
+              (inTopOrBottomBar && (ay > 0.86 || ax > 0.84)) ||
+              (inCenterBody && r > 0.81);
+
+            if (isOuterBoundary) {
+              for (let d = 0.03; d <= 0.17; d += 0.042) {
+                addPoint(
+                  x,
+                  y,
+                  faceZ + zOffset - d,
+                  x,
+                  y * 0.5,
+                  0.2,
+                  MAT_GOLD,
+                  0.8
+                );
+              }
+            }
+          }
+        }
+
+        // 2. ARO LARGO PRATEADO COM RACHADURAS
+        const ringRadiusOut = 0.88;
+        const ringRadiusIn = 0.67;
+        const angleStep = 0.032;
+        const yStep = 0.032;
+
+        for (let theta = -Math.PI; theta < Math.PI; theta += angleStep) {
+          const cosT = Math.cos(theta);
+          const sinT = Math.sin(theta);
+
+          const frontFactor = (cosT + 1) * 0.5;
+          const halfHeight = 0.54 + 0.33 * Math.pow(frontFactor, 1.3);
+
+          for (let y = -halfHeight; y <= halfHeight; y += yStep) {
+            const coveredByFront = (Math.abs(theta) < 0.72);
+            if (!coveredByFront) {
+              const profileCurve = Math.cos((y / halfHeight) * 0.65) * 0.05;
+              const rOut = ringRadiusOut + profileCurve;
+              const px = rOut * sinT;
+              const pz = rOut * cosT;
+
+              const crackEdge = cellularPattern(theta * 1.3, y * 1.8, 3.6);
+              const microRough = hash2D(Math.floor(theta * 90), Math.floor(y * 90));
+
+              const isCrack = crackEdge < 0.068;
+              const mat = isCrack ? MAT_CRACK : MAT_SILVER;
+              const tex = isCrack ? crackEdge * 8.0 : (0.55 + 0.45 * microRough);
+
+              addPoint(px, y, pz, sinT, y * 0.25, cosT, mat, tex);
+            } else if (Math.abs(theta) >= 0.46) {
+              const shoulderR = ringRadiusOut + 0.03;
+              const px = shoulderR * sinT;
+              const pz = shoulderR * cosT;
+              const crackEdge = cellularPattern(theta * 1.3, y * 1.8, 3.6);
+              const isCrack = crackEdge < 0.068;
+              addPoint(
+                px,
+                y,
+                pz,
+                sinT,
+                y * 0.2,
+                cosT,
+                isCrack ? MAT_CRACK : MAT_SILVER,
+                0.75
+              );
+            }
+
+            const ix = ringRadiusIn * sinT;
+            const iz = ringRadiusIn * cosT;
+            addPoint(ix, y * 0.92, iz, -sinT, 0, -cosT, MAT_INNER_DARK, 0.4);
+          }
+
+          for (let sign = -1; sign <= 1; sign += 2) {
+            const edgeY = sign * halfHeight;
+            for (let r = ringRadiusIn; r <= ringRadiusOut; r += 0.045) {
+              if (Math.abs(theta) < 0.62 && r > ringRadiusIn + 0.06) continue;
+              addPoint(
+                r * sinT,
+                edgeY,
+                r * cosT,
+                sinT * 0.25,
+                sign,
+                cosT * 0.25,
+                MAT_SILVER,
+                0.65
+              );
+            }
+          }
+        }
+      }
+
+      buildRingModel();
+
+      function shadePoint(pt, lightIntensity, time, chargeRatio) {
+        const mat = pt.mat;
+        const lit = Math.max(0.06, Math.min(1.0, lightIntensity));
+        const effectiveEnergy = Math.min(1.35, chargeRatio + rechargeGlowBoost * 0.55);
+
+        if (mat === MAT_EMERALD_VEIN) {
+          const pulseSpeed = 1.5 + 3.2 * chargeRatio;
+          const veinPulse = 0.80 + 0.20 * Math.sin(time * pulseSpeed + pt.x * 8.5 + pt.y * 8.5);
+          const lum = (0.04 + 0.96 * Math.pow(chargeRatio, 0.85)) * veinPulse * (0.65 + 0.35 * lit);
+          const clampedLum = Math.min(1.0, lum + rechargeGlowBoost * 0.4);
+
+          const idx = Math.min(RAMP_VEIN.length - 1, Math.floor(clampedLum * RAMP_VEIN.length));
+          const ch = RAMP_VEIN[idx];
+
+          const r = Math.min(255, Math.floor(2 + 95 * Math.pow(effectiveEnergy, 1.8) * pt.tex));
+          const g = Math.min(255, Math.floor(11 + 244 * Math.pow(Math.min(1, effectiveEnergy), 0.78) * (0.75 + 0.25 * pt.tex)));
+          const b = Math.min(255, Math.floor(5 + 115 * Math.pow(effectiveEnergy, 1.5) * pt.tex));
+          return { ch, color: `rgb(${r},${g},${b})` };
+        }
+
+        if (mat === MAT_EMERALD_DEEP) {
+          const glow = (0.03 + 0.82 * Math.pow(chargeRatio, 0.95)) * (0.35 + 0.65 * lit);
+          const idx = Math.min(RAMP_GREEN.length - 1, Math.floor(glow * RAMP_GREEN.length));
+          const ch = RAMP_GREEN[Math.max(1, idx)];
+
+          const r = Math.floor(1 + 18 * rechargeGlowBoost);
+          const g = Math.min(225, Math.floor(8 + 175 * glow + 50 * rechargeGlowBoost));
+          const b = Math.min(140, Math.floor(3 + 52 * glow + 25 * rechargeGlowBoost));
+          return { ch, color: `rgb(${r},${g},${b})` };
+        }
+
+        if (mat === MAT_GOLD) {
+          const spec = Math.pow(lit, 2.5) * 0.55;
+          const val = Math.min(1.0, lit * 0.82 + spec);
+          const idx = Math.min(RAMP_GOLD.length - 1, Math.floor(val * RAMP_GOLD.length));
+          const ch = RAMP_GOLD[Math.max(2, idx)];
+
+          const r = Math.min(255, Math.floor(135 + 115 * val));
+          const g = Math.min(255, Math.floor(98 + 122 * val + 22 * effectiveEnergy));
+          const b = Math.min(170, Math.floor(16 + 88 * spec + 12 * effectiveEnergy));
+          return { ch, color: `rgb(${r},${g},${b})` };
+        }
+
+        if (mat === MAT_SILVER) {
+          const val = Math.min(1.0, lit * (0.70 + 0.30 * pt.tex));
+          const idx = Math.min(RAMP_SILVER.length - 1, Math.floor(val * RAMP_SILVER.length));
+          const ch = RAMP_SILVER[Math.max(1, idx)];
+          const base = Math.floor(55 + 178 * val);
+          const greenBounce = Math.floor(18 * effectiveEnergy);
+          return { ch, color: `rgb(${base},${Math.min(255, base + greenBounce)},${base})` };
+        }
+
+        if (mat === MAT_CRACK) {
+          const idx = Math.min(RAMP_CRACK.length - 1, Math.floor(lit * RAMP_CRACK.length));
+          const ch = RAMP_CRACK[idx];
+          if (rechargeGlowBoost > 0.15) {
+            const gCrack = Math.min(255, Math.floor(60 + 195 * rechargeGlowBoost));
+            return { ch: '+', color: `rgb(10,${gCrack},45)` };
+          }
+          const c = Math.floor(24 + 42 * lit);
+          return { ch, color: `rgb(${c},${c + Math.floor(6 * chargeRatio)},${c + 2})` };
+        }
+
+        const idx = Math.min(4, Math.max(1, Math.floor(lit * 5)));
+        const ch = RAMP_SILVER[idx];
+        const c = Math.floor(20 + 48 * lit);
+        return { ch, color: `rgb(${c},${c + 4},${c + 4})` };
+      }
+
+      function drawAsciiTextCentered(row, text, color) {
+        if (row < 0 || row >= ROWS) return;
+        const startCol = Math.floor((COLS - text.length) * 0.5);
+        for (let i = 0; i < text.length; i++) {
+          const c = startCol + i;
+          if (c >= 0 && c < COLS && text[i] !== ' ') {
+            const idx = row * COLS + c;
+            charBuffer[idx] = text[i];
+            colorBuffer[idx] = color;
+            zBuffer[idx] = 999;
+          }
+        }
+      }
+
+      function renderMinimalHoverInfo(chargeRatio) {
+        if (hoverBlend < 0.20) return;
+
+        const alphaFactor = Math.min(1, (hoverBlend - 0.20) / 0.80);
+        const pct = displayedCharge.toFixed(1);
+        const forceUnits = Math.round((displayedCharge / 100) * 10000);
+
+        const barSlots = 22;
+        const filled = Math.round((displayedCharge / 100) * barSlots);
+        let bar = '[';
+        for (let i = 0; i < barSlots; i++) {
+          bar += i < filled ? '█' : '·';
+        }
+        bar += ']';
+
+        const gMain = Math.floor((95 + 160 * Math.max(0.15, chargeRatio)) * alphaFactor);
+        const rMain = displayedCharge < 15 ? Math.floor(220 * alphaFactor) : Math.floor(40 * chargeRatio * alphaFactor);
+        const bMain = Math.floor(65 * chargeRatio * alphaFactor);
+
+        const mainColor = `rgb(${rMain},${gMain},${bMain})`;
+        const brightColor = `rgb(${Math.floor(170 * alphaFactor)},${Math.floor(255 * alphaFactor)},${Math.floor(195 * alphaFactor)})`;
+
+        drawAsciiTextCentered(90, `FORCA DE VONTADE: ${String(forceUnits).padStart(5, '0')} TF`, brightColor);
+        drawAsciiTextCentered(93, `${bar} ${pct}%`, mainColor);
+        drawAsciiTextCentered(96, `CONTAGEM: ${contagem}`, brightColor);
+      }
+
+      let lastTime = performance.now();
+
+      // ========================================================
+      // INTERAÇÕES: CLIQUE E SEGURAR (LONG-PRESS)
+      // ========================================================
+      const HOLD_THRESHOLD_MS = 1100; // ~1.1 segundos para reiniciar
+      let isPointerDown = false;
+      let pointerStartTime = 0;
+      let pointerStartX = 0;
+      let pointerStartY = 0;
+      let holdTriggered = false;
+
+      const holdIndicator = document.getElementById('hold-indicator');
+      const holdFill = document.getElementById('hold-fill');
+      const holdLabel = document.getElementById('hold-label');
+
+      function reiniciarSequencia() {
+        contagem = 0;
+        window.contagem = 0;
+        salvarContagem(0);
+        atualizarDisplayContagem(true);
+
+        fullChargeTimestamp = Date.now();
+        saveFullChargeTimestamp(fullChargeTimestamp);
+        ringCharge = 100;
+        displayedCharge = 100;
+        isRechargingAnim = true;
+        rechargeGlowBoost = 1.4;
+        resetBannerTimer = 2.4;
+
+        console.log('Sequência apagada e anel reiniciado! Contagem: 0');
+      }
+
+      function efetuarRecarga() {
+        fullChargeTimestamp = Date.now();
+        saveFullChargeTimestamp(fullChargeTimestamp);
+        ringCharge = 100;
+        isRechargingAnim = true;
+        rechargeGlowBoost = 1.0;
+
+        // Adiciona += 1 na contagem e retém na memória
+        contagem += 1;
+        window.contagem = contagem;
+        salvarContagem(contagem);
+
+        atualizarDisplayContagem(true);
+        console.log('Recarregado 100%! Contagem:', contagem);
+      }
+
+      function startHold(clientX, clientY) {
+        isPointerDown = true;
+        pointerStartTime = performance.now();
+        pointerStartX = clientX;
+        pointerStartY = clientY;
+        holdTriggered = false;
+      }
+
+      function cancelHold() {
+        isPointerDown = false;
+        holdTriggered = false;
+        if (holdIndicator) {
+          holdIndicator.style.display = 'none';
+          if (holdFill) holdFill.style.width = '0%';
+          if (holdLabel) holdLabel.textContent = 'REINICIANDO...';
+        }
+      }
+
+      function handlePointerUp() {
+        if (!isPointerDown) return;
+        const elapsed = performance.now() - pointerStartTime;
+        const wasTriggered = holdTriggered;
+        cancelHold();
+
+        // Se soltou antes de completar o tempo de segurar, é um clique -> Recarrega!
+        if (!wasTriggered && elapsed < HOLD_THRESHOLD_MS) {
+          efetuarRecarga();
+        }
+      }
+
+      function animate(now) {
+        const dt = Math.min(0.05, (now - lastTime) / 1000);
+        lastTime = now;
+        const time = now * 0.001;
+
+        // 0. Processa segurar no anel para apagar sequência e reiniciar
+        if (isPointerDown && !holdTriggered) {
+          const elapsed = now - pointerStartTime;
+          const progress = Math.min(1, elapsed / HOLD_THRESHOLD_MS);
+
+          if (elapsed > 120 && holdIndicator && holdFill) {
+            holdIndicator.style.display = 'flex';
+            holdFill.style.width = (progress * 100).toFixed(1) + '%';
+          }
+
+          rechargeGlowBoost = Math.max(rechargeGlowBoost, progress * 0.5);
+
+          if (elapsed >= HOLD_THRESHOLD_MS) {
+            holdTriggered = true;
+            if (holdLabel) holdLabel.textContent = 'SEQUÊNCIA APAGADA!';
+            if (holdFill) holdFill.style.width = '100%';
+            reiniciarSequencia();
+
+            if (navigator.vibrate) {
+              try { navigator.vibrate([60, 40, 80]); } catch (e) {}
+            }
+
+            setTimeout(() => {
+              if (holdIndicator) holdIndicator.style.display = 'none';
+              if (holdLabel) holdLabel.textContent = 'REINICIANDO...';
+              if (holdFill) holdFill.style.width = '0%';
+            }, 800);
+          }
+        }
+
+        // 1. Atualiza carga real pelo relógio do PC
+        ringCharge = computeRealTimeCharge();
+
+        if (isRechargingAnim) {
+          displayedCharge += (100 - displayedCharge) * Math.min(1, dt * 8.0);
+          rechargeGlowBoost = Math.max(0, rechargeGlowBoost - dt * 0.85);
+          if (Math.abs(100 - displayedCharge) < 0.15 && rechargeGlowBoost <= 0.02) {
+            displayedCharge = ringCharge;
+            isRechargingAnim = false;
+            rechargeGlowBoost = 0;
+          }
+        } else {
+          displayedCharge = ringCharge;
+        }
+
+        const chargeRatio = Math.max(0, Math.min(1, displayedCharge / 100));
+
+        // 2. Suavização do hover e parallax orbital
+        const targetHover = isHovered ? 1.0 : 0.0;
+        hoverBlend += (targetHover - hoverBlend) * Math.min(1.0, dt * 5.0);
+
+        smoothMouseX += (mouseNormX - smoothMouseX) * Math.min(1.0, dt * 4.5);
+        smoothMouseY += (mouseNormY - smoothMouseY) * Math.min(1.0, dt * 4.5);
+
+        // 3. Rotação planetária ininterrupta, estável e majestosa
+        spinAngle += SPIN_SPEED * dt;
+
+        const nutation = Math.sin(time * 0.35) * 0.035;
+        const precession = Math.cos(time * 0.25) * 0.04;
+
+        const camPitch = smoothMouseY * 0.18 * hoverBlend;
+        const camYaw = smoothMouseX * 0.26 * hoverBlend;
+        const camRoll = -smoothMouseX * 0.08 * hoverBlend;
+
+        const pitch = AXIAL_PITCH + nutation + camPitch;
+        const roll = AXIAL_ROLL + camRoll;
+        const yaw = precession + camYaw;
+        const spin = spinAngle;
+
+        const cSpin = Math.cos(spin), sSpin = Math.sin(spin);
+        const cRoll = Math.cos(roll), sRoll = Math.sin(roll);
+        const cPitch = Math.cos(pitch), sPitch = Math.sin(pitch);
+        const cYaw = Math.cos(yaw), sYaw = Math.sin(yaw);
+
+        // Limpa buffers
+        for (let i = 0; i < totalCells; i++) {
+          zBuffer[i] = -9999;
+          charBuffer[i] = '';
+          colorBuffer[i] = '';
+        }
+
+        // Vetor de luz no mundo
+        const lxWorld = 0.35 + smoothMouseX * hoverBlend * 0.35;
+        const lyWorld = -0.45 + smoothMouseY * hoverBlend * 0.35;
+        const lzWorld = 0.82;
+        const lLen = Math.sqrt(lxWorld * lxWorld + lyWorld * lyWorld + lzWorld * lzWorld);
+        const nlx = lxWorld / lLen, nly = lyWorld / lLen, nlz = lzWorld / lLen;
+
+        const localLight = worldToLocal(nlx, nly, nlz, cSpin, sSpin, cRoll, sRoll, cPitch, sPitch, cYaw, sYaw);
+
+        const scale = 31.2;
+        const cameraDist = 3.60;
+        const orbitFloat = Math.sin(time * 0.75) * 1.6;
+        const centerRowOffset = ROWS * 0.5 - hoverBlend * 2.5 + orbitFloat;
+
+        // 4. Partículas cósmicas verdes orbitando
+        const activeSparks = Math.floor(sparks.length * Math.pow(chargeRatio, 1.2));
+        for (let i = 0; i < activeSparks; i++) {
+          const sp = sparks[i];
+          const a = sp.angle + time * sp.speed * (0.35 + 0.65 * chargeRatio + rechargeGlowBoost * 2.2);
+          const r = sp.radius + Math.sin(time * 1.5 + sp.phase) * 0.08;
+          const px = Math.cos(a) * r;
+          const py = sp.y * 0.62;
+          const pz = Math.sin(a) * r * 0.55;
+
+          const spWorld = localToWorld(px, py, pz, 1, 0, cRoll, sRoll, cPitch, sPitch, cYaw, sYaw);
+
+          const persp = cameraDist / (cameraDist - spWorld.wz);
+          const col = Math.floor(COLS * 0.5 + spWorld.wx * scale * persp);
+          const row = Math.floor(centerRowOffset + spWorld.wy * scale * persp);
+
+          if (col >= 0 && col < COLS && row >= 0 && row < ROWS) {
+            const idx = row * COLS + col;
+            if (spWorld.wz > zBuffer[idx]) {
+              zBuffer[idx] = spWorld.wz;
+              charBuffer[idx] = sp.char;
+              const gSpark = Math.min(255, Math.floor(35 + 195 * chargeRatio + 60 * rechargeGlowBoost));
+              colorBuffer[idx] = `rgb(0,${gSpark},${Math.floor(gSpark * 0.35)})`;
+            }
+          }
+        }
+
+        // 5. Projeção 3D do anel
+        for (let i = 0; i < ringPoints.length; i++) {
+          const pt = ringPoints[i];
+
+          const worldPos = localToWorld(pt.x, pt.y, pt.z, cSpin, sSpin, cRoll, sRoll, cPitch, sPitch, cYaw, sYaw);
+          const persp = cameraDist / (cameraDist - worldPos.wz);
+
+          const screenX = COLS * 0.5 + worldPos.wx * scale * persp;
+          const screenY = centerRowOffset + worldPos.wy * scale * persp;
+
+          const col = Math.floor(screenX);
+          const row = Math.floor(screenY);
+
+          if (col >= 0 && col < COLS && row >= 0 && row < ROWS) {
+            const idx = row * COLS + col;
+            if (worldPos.wz > zBuffer[idx]) {
+              zBuffer[idx] = worldPos.wz;
+
+              const dotLight = pt.nx * localLight.lx + pt.ny * localLight.ly + pt.nz * localLight.lz;
+              const lightIntensity = (dotLight + 1.0) * 0.5;
+              const shaded = shadePoint(pt, lightIntensity, time, chargeRatio);
+
+              charBuffer[idx] = shaded.ch;
+              colorBuffer[idx] = shaded.color;
+            }
+          }
+        }
+
+        // 6. Mensagem de sequência reiniciada no terminal ASCII
+        if (resetBannerTimer > 0) {
+          resetBannerTimer -= dt;
+          drawAsciiTextCentered(48, "== SEQUENCIA REINICIADA ==", "rgb(0, 255, 180)");
+          drawAsciiTextCentered(51, "CONTAGEM: 0", "rgb(200, 255, 230)");
+        }
+
+        // 7. Informações no hover
+        if (hoverBlend > 0.20) {
+          renderMinimalHoverInfo(chargeRatio);
+        }
+
+        // 8. Desenho no canvas
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+
+        const auraStrength = (Math.pow(chargeRatio, 1.35) * 0.22) + (rechargeGlowBoost * 0.28);
+        if (auraStrength > 0.005) {
+          const glowX = SCREEN_W * 0.5 + smoothMouseX * hoverBlend * 22;
+          const glowY = SCREEN_H * 0.5 - hoverBlend * 16 + smoothMouseY * hoverBlend * 22;
+          const grad = ctx.createRadialGradient(glowX, glowY, 8, glowX, glowY, 225);
+          grad.addColorStop(0, `rgba(0, 255, 102, ${Math.min(0.45, auraStrength)})`);
+          grad.addColorStop(0.55, `rgba(0, 140, 55, ${Math.min(0.22, auraStrength * 0.45)})`);
+          grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+        }
+
+        ctx.font = 'bold 7px "JetBrains Mono", monospace';
+        ctx.textBaseline = 'top';
+
+        for (let r = 0; r < ROWS; r++) {
+          const py = r * CELL_H;
+          const rowOffset = r * COLS;
+          for (let c = 0; c < COLS; c++) {
+            const idx = rowOffset + c;
+            const ch = charBuffer[idx];
+            if (ch) {
+              ctx.fillStyle = colorBuffer[idx];
+              ctx.fillText(ch, c * CELL_W, py);
+            }
+          }
+        }
+
+        requestAnimationFrame(animate);
+      }
+
+      function updatePointerPosition(clientX, clientY) {
+        const centerX = window.innerWidth * 0.5;
+        const centerY = window.innerHeight * 0.5;
+        const halfMin = Math.max(80, Math.min(window.innerWidth, window.innerHeight) * 0.46);
+
+        const nx = (clientX - centerX) / halfMin;
+        const ny = (clientY - centerY) / halfMin;
+
+        isHovered = true;
+        mouseNormX = Math.max(-1, Math.min(1, nx));
+        mouseNormY = Math.max(-1, Math.min(1, ny));
+      }
+
+      window.addEventListener('mousemove', (e) => {
+        updatePointerPosition(e.clientX, e.clientY);
+      });
+
+      document.addEventListener('mouseleave', () => {
+        isHovered = false;
+        cancelHold();
+      });
+
+      window.addEventListener('blur', () => {
+        isHovered = false;
+        cancelHold();
+      });
+
+      // Pointer events no canvas para clique (recarregar) e segurar (reiniciar)
+      canvas.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0 && e.pointerType === 'mouse') return;
+        updatePointerPosition(e.clientX, e.clientY);
+        startHold(e.clientX, e.clientY);
+      });
+
+      window.addEventListener('pointermove', (e) => {
+        updatePointerPosition(e.clientX, e.clientY);
+        if (isPointerDown) {
+          const dist = Math.hypot(e.clientX - pointerStartX, e.clientY - pointerStartY);
+          if (dist > 50) {
+            cancelHold();
+          }
+        }
+      });
+
+      window.addEventListener('pointerup', () => {
+        if (isPointerDown) {
+          handlePointerUp();
+        }
+      });
+
+      window.addEventListener('pointercancel', () => {
+        cancelHold();
+      });
+
+      // Previne menu de contexto ao segurar no anel
+      canvas.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+      });
+
+      // Clique em qualquer outro ponto fora do canvas recarrega
+      window.addEventListener('click', (e) => {
+        if (e.target !== canvas && !e.target.closest('#contador-display') && !e.target.closest('#hold-indicator')) {
+          efetuarRecarga();
+        }
+      });
+
+      // Roda do mouse permite testar a descarga/carga (0% a 100%)
+      window.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const stepMs = (e.deltaY > 0 ? 1 : -1) * (9 * 60 * 1000);
+        fullChargeTimestamp = Math.min(
+          Date.now(),
+          Math.max(Date.now() - THREE_HOURS_MS, fullChargeTimestamp - stepMs)
+        );
+        saveFullChargeTimestamp(fullChargeTimestamp);
+        isRechargingAnim = false;
+      }, { passive: false });
+
+      // Janela flutuante Picture-in-Picture
+      async function toggleFloatingPiP() {
+        try {
+          if (document.pictureInPictureElement) {
+            await document.exitPictureInPicture();
+            return;
+          }
+          if (!pipVideo.srcObject) {
+            pipVideo.srcObject = canvas.captureStream(60);
+          }
+          await pipVideo.play();
+          await pipVideo.requestPictureInPicture();
+        } catch (err) {
+          // Ignora silenciosamente se o navegador não suportar PiP
+        }
+      }
+
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'p' || e.key === 'P') {
+          toggleFloatingPiP();
+        }
+      });
+
+      window.addEventListener('dblclick', (e) => {
+        if (e.target === canvas) {
+          toggleFloatingPiP();
+        }
+      });
+
+      window.onload = function () {
+        atualizarDisplayContagem(false);
+        requestAnimationFrame(animate);
+      };
+    })();
+  </script>
+</body>
+
+</html>
